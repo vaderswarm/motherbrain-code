@@ -14,7 +14,9 @@
     "start": "electron .",
     "smoke": "node scripts/smoke.mjs",
     "dist": "npm run build && electron-builder --mac dir",
-    "test": "vitest run"
+    "test": "vitest run",
+    "icon": "electron scripts/make-icon.mjs",
+    "fixtures": "node scripts/make-tape-fixtures.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.295",
@@ -72,7 +74,8 @@
         "dir"
       ],
       "identity": null,
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "icon": "build/icon.icns"
     }
   }
 }
