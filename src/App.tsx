@@ -27,6 +27,7 @@ export default function App() {
     ;(async () => {
       const info = await mb().info()
       setDemo(info.demo)
+      if (info.view) setView(info.view as View)
       setState(info.demo ? demoState() : await mb().loadState())
     })()
   }, [])

@@ -12,7 +12,8 @@
     "build": "npm run typecheck && npm run build:main && npm run build:renderer",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit",
     "start": "electron .",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "dist": "npm run build && electron-builder --mac dir"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.295",
@@ -20,7 +21,8 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "uplot": "^1.6.32"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -31,9 +33,44 @@
     "concurrently": "^10.0.6",
     "cross-env": "^10.1.0",
     "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "wait-on": "^9.5.1"
+  },
+  "build": {
+    "appId": "local.vader.motherbrain-code",
+    "productName": "Motherbrain Code",
+    "directories": {
+      "output": "dist/app",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/index.html",
+      "dist/assets/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "py",
+        "to": "py",
+        "filter": [
+          "*.py"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/**"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dir"
+      ],
+      "identity": null,
+      "hardenedRuntime": false
+    }
   }
 }

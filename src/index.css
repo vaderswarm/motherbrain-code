@@ -65,3 +65,10 @@ body {
 .pulse { animation: pulse-dot 1.4s ease-in-out infinite; }
 @keyframes spin { to { transform: rotate(360deg) } }
 .spin { animation: spin 0.9s linear infinite; }
+
+/* uPlot on the dark tape panel */
+.tape-plot .u-legend { color: var(--color-ink-2); font-size: 12px; text-align: left; margin-top: 4px; }
+.tape-plot .u-legend th { font-weight: 500; color: var(--color-mute); }
+.tape-plot .u-legend .u-marker { border-radius: 2px; }
+.tape-plot .u-select { background: rgba(255,255,255,0.06); }
+.tape-plot .u-cursor-x, .tape-plot .u-cursor-y { border-color: #5a5a58 !important; }

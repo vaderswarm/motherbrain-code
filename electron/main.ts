@@ -11,11 +11,16 @@ import { resolveDecision } from './bridge.js'
 import { claudePath, claudeVersion, interruptClaude, runClaude } from './claude.js'
 import { interruptMotherbrain, mbToolSchemas, motherbrainHealth, runMotherbrain } from './motherbrain.js'
 import { loadState, saveState } from './store.js'
+import { tapeDays, tapeLedger, tapeSummary, tapeWindow, tapeWindows } from './tape.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const argv = process.argv
 const capturePath = argv.includes('--capture') ? argv[argv.indexOf('--capture') + 1] : undefined
 const demo = argv.includes('--demo')
+const startView = argv.includes('--view') ? argv[argv.indexOf('--view') + 1] : undefined
+const winSize = argv.includes('--size') ? argv[argv.indexOf('--size') + 1].split('x').map(Number) : [1440, 940]
+const startTab = argv.includes('--tab') ? argv[argv.indexOf('--tab') + 1] : undefined
+const captureDelay = argv.includes('--capture-delay') ? Number(argv[argv.indexOf('--capture-delay') + 1]) : 2500
 
 // A Finder-launched app gets a minimal PATH; the claude CLI and its tools need the usual one.
 process.env.PATH = [join(homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH].filter(Boolean).join(':')
@@ -28,8 +33,8 @@ function emit(sessionKey: string, ev: EngineEvent) {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1440,
-    height: 940,
+    width: winSize[0],
+    height: winSize[1],
     minWidth: 900,
     minHeight: 600,
     title: 'Motherbrain Code',
@@ -49,8 +54,8 @@ function createWindow() {
     return { action: 'deny' }
   })
   const dev = process.env.VITE_DEV_SERVER_URL
-  if (dev) win.loadURL(dev)
-  else win.loadFile(join(here, '..', '..', 'dist', 'index.html'))
+  if (dev) win.loadURL(dev + (startTab ? `#${startTab}` : ''))
+  else win.loadFile(join(here, '..', '..', 'dist', 'index.html'), startTab ? { hash: startTab } : undefined)
 
   win.webContents.on('console-message', (e: any) => {
     const level = e.level ?? ''
@@ -63,12 +68,12 @@ function createWindow() {
         writeFileSync(capturePath, img.toPNG())
         console.log('[capture] wrote', capturePath)
         app.quit()
-      }, 2500)
+      }, captureDelay)
     })
   }
 }
 
-ipcMain.handle('app:info', () => ({ demo, platform: process.platform }))
+ipcMain.handle('app:info', () => ({ demo, platform: process.platform, view: startView }))
 ipcMain.handle('state:load', () => loadState())
 ipcMain.handle('state:save', (_e, s: AppState) => {
   if (!demo) saveState(s)
@@ -80,6 +85,11 @@ ipcMain.handle('engine:send', (_e, args: SendArgs) => {
 })
 ipcMain.handle('engine:interrupt', (_e, sessionKey: string) => interruptClaude(sessionKey) || interruptMotherbrain(sessionKey))
 ipcMain.handle('decision:respond', (_e, id: string, value: unknown) => resolveDecision(id, value))
+ipcMain.handle('tape:days', (_e, asset?: string) => tapeDays(asset))
+ipcMain.handle('tape:windows', (_e, day: string, asset?: string) => tapeWindows(day, asset))
+ipcMain.handle('tape:window', (_e, ticker: string, day: string, strategy: string) => tapeWindow(ticker, day, strategy))
+ipcMain.handle('tape:summary', (_e, d0: string, d1: string, asset?: string) => tapeSummary(d0, d1, asset))
+ipcMain.handle('tape:ledger', () => tapeLedger())
 ipcMain.handle('health', async (): Promise<HealthReport> => {
   const [mb, tools] = await Promise.all([motherbrainHealth(), mbToolSchemas()])
   return {

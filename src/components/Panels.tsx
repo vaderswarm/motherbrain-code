@@ -10,20 +10,7 @@ function Shell(props: { icon: React.ReactNode; title: string; children: React.Re
   )
 }
 
-// Stub: will render the core/tape oracle map and the rule ledger
-// (~/vader-swarm/data/kalshi/lab/tape/oracle/*.parquet, rule_ledger.jsonl).
-export function TapePanel() {
-  return (
-    <Shell icon={<Activity size={20} className="text-accent" />} title="Tape">
-      <p>The tape room: the hindsight map of every window and the ledger of every rule Motherbrain has tried.</p>
-      <div className="rounded-xl border border-dashed border-line-strong p-5 text-mute">
-        Not wired yet. Planned views: window replay (Kalshi taker prices, Binance, strike, tau) with oracle entries overlaid ·
-        strategy × tau heatmap of net c/ct · rule ledger with attempt counts, walk-forward results and the noise floor.
-        Source: <code className="text-coral">~/vader-swarm/data/kalshi/lab/tape/</code>
-      </div>
-    </Shell>
-  )
-}
+export { TapeView as TapePanel } from './Tape'
 
 export function ArtifactsPanel() {
   return (

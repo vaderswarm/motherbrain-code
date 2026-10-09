@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('mb', {
   interrupt: (key) => ipcRenderer.invoke('engine:interrupt', key),
   respond: (id, value) => ipcRenderer.invoke('decision:respond', id, value),
   health: () => ipcRenderer.invoke('health'),
+  tape: {
+    days: (asset) => ipcRenderer.invoke('tape:days', asset),
+    windows: (day, asset) => ipcRenderer.invoke('tape:windows', day, asset),
+    window: (ticker, day, strategy) => ipcRenderer.invoke('tape:window', ticker, day, strategy),
+    summary: (d0, d1, asset) => ipcRenderer.invoke('tape:summary', d0, d1, asset),
+    ledger: () => ipcRenderer.invoke('tape:ledger'),
+  },
   onEvent: (cb) => {
     const h = (_e, key, ev) => cb(key, ev)
     ipcRenderer.on('engine:event', h)
