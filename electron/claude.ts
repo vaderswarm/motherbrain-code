@@ -1,6 +1,6 @@
 // Claude Code engine: drives the local `claude` CLI through the Agent SDK, so it runs on the
 // signed-in subscription and its sessions land in ~/.claude/projects like any CLI session.
-import { query, type Options, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+import { query, type Options, type PermissionResult, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process'
 import type { SendArgs } from '../shared/types.js'
 import { MODELS } from '../shared/types.js'
 import { awaitDecision, newId, type Emit } from './bridge.js'
+import { attachmentText, imageBlocks } from './attachments.js'
 
 const running = new Map<string, AbortController>()
 
@@ -84,8 +85,26 @@ export async function runClaude(args: SendArgs, emit: Emit): Promise<void> {
   const exe = claudePath()
   if (exe) options.pathToClaudeCodeExecutable = exe
 
+  // Attachments: text is inlined into the prompt; images need a structured user message, which the
+  // SDK takes as a one-message input stream.
+  const atts = args.attachments ?? []
+  const text = args.prompt + attachmentText(atts, 'claude')
+  const { blocks: images, skipped } = imageBlocks(atts)
+  for (const s of skipped) emit(sessionKey, { type: 'meta', text: `Image not sent: ${s}` })
+  let prompt: string | AsyncIterable<SDKUserMessage> = text
+  if (images.length) {
+    const msg: SDKUserMessage = {
+      type: 'user',
+      parent_tool_use_id: null,
+      message: { role: 'user', content: [{ type: 'text', text }, ...images] as any },
+    }
+    prompt = (async function* () {
+      yield msg
+    })()
+  }
+
   try {
-    for await (const msg of query({ prompt: args.prompt, options })) {
+    for await (const msg of query({ prompt, options })) {
       switch (msg.type) {
         case 'system':
           if ((msg as any).subtype === 'init') emit(sessionKey, { type: 'claude-session', sessionId: msg.session_id })

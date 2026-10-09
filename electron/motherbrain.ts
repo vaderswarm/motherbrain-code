@@ -2,6 +2,8 @@
 // sandboxed tools from mb-tools (:8140) plus one app-side tool, spawn_claude_session, which only
 // runs after the user approves a card in the transcript.
 import type { Message, SendArgs } from '../shared/types.js'
+import { buildHistory, type ChatMessage } from '../shared/history.js'
+import { attachmentText } from './attachments.js'
 import { awaitDecision, newId, type Emit } from './bridge.js'
 
 export const MB_URL = process.env.MB_URL ?? 'http://localhost:8100/v1'
@@ -64,17 +66,10 @@ export async function mbToolSchemas(): Promise<any[] | null> {
   }
 }
 
-function toChat(history: Message[], prompt: string): any[] {
-  const msgs: any[] = [{ role: 'system', content: SYSTEM }]
-  for (const m of history) {
-    const text = m.blocks
-      .filter((b) => b.kind === 'text')
-      .map((b) => (b as any).text)
-      .join('\n')
-    if (text.trim()) msgs.push({ role: m.role, content: text })
-  }
-  msgs.push({ role: 'user', content: prompt })
-  return msgs
+// System prompt + the replayed transcript (text, tool calls and tool results; see shared/history.ts)
+// + this turn's prompt.
+export function toChat(history: Message[], prompt: string): ChatMessage[] {
+  return [{ role: 'system', content: SYSTEM }, ...buildHistory(history), { role: 'user', content: prompt }]
 }
 
 interface StreamOut {
@@ -150,7 +145,7 @@ export async function runMotherbrain(args: SendArgs, emit: Emit): Promise<void> 
     const mbTools = await mbToolSchemas()
     if (!mbTools) emit(sessionKey, { type: 'meta', text: 'mb-tools offline — Motherbrain is answering without code_interpreter.' })
     const tools = [...(mbTools ?? []).map((t: any) => (t.type ? t : { type: 'function', function: t })), SPAWN_TOOL]
-    const messages = toChat(args.history, args.prompt)
+    const messages: any[] = toChat(args.history, args.prompt + attachmentText(args.attachments ?? [], 'motherbrain'))
 
     for (let step = 0; step < MAX_STEPS; step++) {
       const out = await streamChat({ model: args.model, messages, tools, max_tokens: 4096 }, ac.signal, (t) =>

@@ -36,10 +36,21 @@ export type Block =
   | { kind: 'error'; text: string }
   | { kind: 'meta'; text: string }
 
+// A file attached to a user turn. Only the path and metadata are stored; the main process reads
+// the file when the turn is sent (text is inlined, images go to the Claude engine as image blocks).
+export interface Attachment {
+  path: string
+  name: string
+  size: number
+  mime: string
+  kind: 'image' | 'text' | 'binary'
+}
+
 export interface Message {
   role: 'user' | 'assistant'
   blocks: Block[]
   ts: number
+  attachments?: Attachment[]
 }
 
 export interface Session {
@@ -91,6 +102,7 @@ export interface SendArgs {
   cwd: string
   claudeSessionId?: string
   history: Message[] // used by Motherbrain (stateless chat API)
+  attachments?: Attachment[]
 }
 
 export interface HealthReport {

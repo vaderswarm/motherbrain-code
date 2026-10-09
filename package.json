@@ -2,7 +2,7 @@
   "name": "motherbrain-code",
   "version": "0.0.1",
   "private": true,
-  "description": "Motherbrain Code \u2014 a desktop shell for the Motherbrain hero and Claude Code sessions",
+  "description": "Motherbrain Code — a desktop shell for the Motherbrain hero and Claude Code sessions",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -10,10 +10,11 @@
     "build:main": "tsc -p tsconfig.main.json && cp electron/preload.cjs dist-electron/electron/preload.cjs",
     "build:renderer": "vite build",
     "build": "npm run typecheck && npm run build:main && npm run build:renderer",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "start": "electron .",
     "smoke": "node scripts/smoke.mjs",
-    "dist": "npm run build && electron-builder --mac dir"
+    "dist": "npm run build && electron-builder --mac dir",
+    "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.295",
@@ -37,6 +38,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
+    "vitest": "^5.0.3",
     "wait-on": "^9.5.1"
   },
   "build": {
