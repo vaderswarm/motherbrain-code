@@ -8,12 +8,51 @@ import { Activity, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { mb } from '../api'
+import { toSecondGrid } from '../lib/downsample'
 
 // dataviz reference palette, dark steps (validated on #1e1e1e: all checks pass)
 const C = { s1: '#3987e5', s2: '#d95926', ref: '#8f8d89', grid: '#2e2e2e', axis: '#8f8d89', neg: [230, 103, 103], pos: [57, 135, 229], mid: [56, 56, 53] }
 const AXIS_W = 64
 
 type Tab = 'replay' | 'hindsight' | 'ledger'
+type Asset = 'BTC' | 'ETH'
+const ASSETS: Asset[] = ['BTC', 'ETH']
+const W = 900 // seconds in a window; x = 900 − τ
+
+// A rule's entry in the current window, on the chart's x (seconds since the open).
+interface Marker { x: number; side: 'yes' | 'no' }
+const sideColor = (side: string) => (side === 'no' ? C.s2 : C.s1)
+
+// Prices are step functions (a value holds until the next print), so every series is drawn stepped.
+const stepped = uPlot.paths.stepped!({ align: 1 })
+
+// Vertical entry markers on a uPlot chart.
+function markerPlugin(markers: Marker[]): uPlot.Plugin {
+  return {
+    hooks: {
+      draw: (u) => {
+        if (!markers.length) return
+        const g = u.ctx
+        const { top, height } = u.bbox
+        const dpr = devicePixelRatio
+        g.save()
+        g.lineWidth = 1.5 * dpr
+        g.font = `${10.5 * dpr}px system-ui, -apple-system, sans-serif`
+        for (const m of markers) {
+          const px = Math.round(u.valToPos(m.x, 'x', true))
+          g.strokeStyle = g.fillStyle = sideColor(m.side)
+          g.setLineDash([5 * dpr, 3 * dpr])
+          g.beginPath()
+          g.moveTo(px, top)
+          g.lineTo(px, top + height)
+          g.stroke()
+          g.fillText(m.side.toUpperCase(), px + 4 * dpr, top + 11 * dpr)
+        }
+        g.restore()
+      },
+    },
+  }
+}
 
 const ct = (epoch: number) =>
   new Date(epoch * 1000).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit', hour12: false })
@@ -92,7 +131,7 @@ const yAxis = (fmt: (v: number) => string): uPlot.Axis => ({
   font: '11px system-ui, -apple-system, Helvetica Neue, sans-serif',
 })
 
-function Replay() {
+function Replay({ asset }: { asset: Asset }) {
   const [days, setDays] = useState<string[]>([])
   const [strategies, setStrategies] = useState<string[]>([])
   const [day, setDay] = useState('')
@@ -103,9 +142,20 @@ function Replay() {
   const [err, setErr] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [plot, setPlot] = useState<{ left: number; width: number }>({ left: AXIS_W, width: 0 })
+  const [rules, setRules] = useState<any[]>([])
+  const [rule, setRule] = useState('')
+  const [entries, setEntries] = useState<{ s: number; side: 'yes' | 'no' }[]>([])
+  const [ruleNote, setRuleNote] = useState<string>()
+
+  // ledger rules for this asset (rows without an asset field are BTC, the only asset before ETH)
+  useEffect(() => {
+    mb().tape.ledger().then((r) => setRules((r.rows ?? []).filter((x: any) => (x.asset ?? 'BTC') === asset)))
+  }, [asset])
+  const ruleKey = (r: any, i: number) => String(r.attempt_global ?? `i${i}`)
+  const ruleRow = rules.find((r, i) => ruleKey(r, i) === rule)
 
   useEffect(() => {
-    mb().tape.days().then((r) => {
+    mb().tape.days(asset).then((r) => {
       if (r.error) return setErr(r.error)
       setDays(r.days)
       setStrategies(r.strategies)
@@ -115,26 +165,57 @@ function Replay() {
   }, [])
   useEffect(() => {
     if (!day) return
-    mb().tape.windows(day).then((r) => {
+    mb().tape.windows(day, asset).then((r) => {
       if (r.error) return setErr(r.error)
       setWins(r.windows)
       setTicker((t) => (r.windows.some((x: any) => x.ticker === t) ? t : r.windows[Math.floor(r.windows.length / 2)]?.ticker ?? ''))
     })
-  }, [day])
+  }, [day, asset])
   useEffect(() => {
     if (!ticker || !day) return
     setLoading(true)
-    mb().tape.window(ticker, day, strategy).then((r) => {
+    mb().tape.window(ticker, day, strategy, asset).then((r) => {
       setLoading(false)
       if (r.error) return setErr(r.error)
       setErr(undefined)
       setW(r)
     })
-  }, [ticker, day, strategy])
+  }, [ticker, day, strategy, asset])
 
-  const x = useMemo(() => (w ? w.tau.map((t: number) => 900 - t) : []), [w])
-  const pxData = useMemo(() => (w ? ([x, w.yes_px.map((v: number | null) => (v === null ? null : v * 100)), w.no_px.map((v: number | null) => (v === null ? null : v * 100)), w.mid.map((v: number | null) => (v === null ? null : v * 100))] as uPlot.AlignedData) : null), [w, x])
-  const spData = useMemo(() => (w ? ([x, w.bn, w.idx, x.map(() => w.K)] as uPlot.AlignedData) : null), [w, x])
+  // the selected rule's entries in this window
+  useEffect(() => {
+    setEntries([])
+    setRuleNote(undefined)
+    if (!ruleRow || !ticker || !day) return
+    let live = true
+    mb().tape.entries(ticker, day, asset, ruleRow).then((r) => {
+      if (!live) return
+      if (r.error) return setRuleNote(r.error)
+      setEntries(r.entries ?? [])
+      setRuleNote(r.note)
+    })
+    return () => {
+      live = false
+    }
+  }, [ruleRow, ticker, day, asset])
+
+  // Every series on a 1-s grid over the whole window: each price change kept, holes held as steps
+  // (see lib/downsample.ts). Never thinner than one point per second.
+  const grid = useMemo(() => {
+    if (!w) return null
+    const xs = w.tau.map((t: number) => W - t)
+    const c = (v: number | null) => (v === null ? null : v * 100)
+    return toSecondGrid(xs, [w.yes_px.map(c), w.no_px.map(c), w.mid.map(c), w.bn, w.idx], 0, W - 1)
+  }, [w])
+  const pxData = useMemo(() => (grid ? ([grid.x, grid.ys[0], grid.ys[1], grid.ys[2]] as uPlot.AlignedData) : null), [grid])
+  const spData = useMemo(() => (grid && w ? ([grid.x, grid.ys[3], grid.ys[4], grid.x.map(() => w.K)] as uPlot.AlignedData) : null), [grid, w])
+  const markers = useMemo<Marker[]>(() => {
+    if (!w) return []
+    return entries.flatMap((e) => {
+      const i = w.s.indexOf(e.s)
+      return i < 0 ? [] : [{ x: W - w.tau[i], side: e.side }]
+    })
+  }, [entries, w])
 
   const pxRef = useUPlot(
     () => ({
@@ -144,15 +225,16 @@ function Replay() {
       axes: [xAxis(false), yAxis((v) => `${v}¢`)],
       cursor: { sync: { key: 'tape' }, points: { size: 8 } },
       legend: { live: true },
+      plugins: [markerPlugin(markers)],
       series: [
         { label: 'τ', value: (_u, v) => (v == null ? '—' : `${900 - v} s`) },
-        { label: 'YES taker', stroke: C.s1, width: 2, value: (_u, v) => (v == null ? '—' : `${v.toFixed(0)}¢`) },
-        { label: 'NO taker', stroke: C.s2, width: 2, value: (_u, v) => (v == null ? '—' : `${v.toFixed(0)}¢`) },
-        { label: 'mid', stroke: C.ref, width: 1, dash: [4, 4], value: (_u, v) => (v == null ? '—' : `${v.toFixed(1)}¢`) },
+        { label: 'YES taker', stroke: C.s1, width: 2, paths: stepped, value: (_u, v) => (v == null ? '—' : `${v.toFixed(0)}¢`) },
+        { label: 'NO taker', stroke: C.s2, width: 2, paths: stepped, value: (_u, v) => (v == null ? '—' : `${v.toFixed(0)}¢`) },
+        { label: 'mid', stroke: C.ref, width: 1, dash: [4, 4], paths: stepped, value: (_u, v) => (v == null ? '—' : `${v.toFixed(1)}¢`) },
       ],
     }),
     pxData,
-    [pxData],
+    [pxData, markers],
     (u) => setPlot({ left: u.bbox.left / devicePixelRatio, width: u.bbox.width / devicePixelRatio }),
   )
   const spRef = useUPlot(
@@ -163,15 +245,16 @@ function Replay() {
       axes: [xAxis(true), yAxis((v) => v.toLocaleString('en-US', { maximumFractionDigits: 0 }))],
       cursor: { sync: { key: 'tape' }, points: { size: 8 } },
       legend: { live: true },
+      plugins: [markerPlugin(markers)],
       series: [
         { label: 'τ', value: (_u, v) => (v == null ? '—' : `${900 - v} s`) },
-        { label: 'Binance spot', stroke: C.s1, width: 2, value: (_u, v) => (v == null ? '—' : v.toFixed(2)) },
-        { label: 'index (BRTI)', stroke: C.s2, width: 2, value: (_u, v) => (v == null ? '—' : v.toFixed(2)) },
+        { label: 'Binance spot', stroke: C.s1, width: 1.5, paths: stepped, value: (_u, v) => (v == null ? '—' : v.toFixed(2)) },
+        { label: asset === 'ETH' ? 'index (ETH RTI)' : 'index (BRTI)', stroke: C.s2, width: 1.5, paths: stepped, value: (_u, v) => (v == null ? '—' : v.toFixed(2)) },
         { label: 'strike K', stroke: C.ref, width: 1, dash: [6, 4], value: (_u, v) => (v == null ? '—' : v.toFixed(2)) },
       ],
     }),
     spData,
-    [spData],
+    [spData, markers],
   )
 
   // hindsight strip
@@ -196,7 +279,16 @@ function Replay() {
         g.fillRect(Math.floor((900 - w.tau[i]) * bw), row * (H / 2) * dpr + (row ? 1 * dpr : 0), Math.ceil(bw), (H / 2 - 1) * dpr)
       })
     })
-  }, [w, plot])
+    // the selected rule's entries: an outlined cell in that side's row
+    g.lineWidth = 1.5 * dpr
+    g.strokeStyle = '#ecebe8'
+    for (const m of markers) {
+      const row = m.side === 'no' ? 1 : 0
+      const cw = Math.max(4 * dpr, Math.ceil(bw))
+      const x0 = Math.floor(m.x * bw) - (cw - Math.ceil(bw)) / 2
+      g.strokeRect(x0 + 0.75 * dpr, row * (H / 2) * dpr + 0.75 * dpr, cw - 1.5 * dpr, (H / 2 - 1) * dpr - 1.5 * dpr)
+    }
+  }, [w, plot, markers])
 
   const idx = wins.findIndex((x) => x.ticker === ticker)
   const step = (d: number) => {
@@ -217,9 +309,39 @@ function Replay() {
         />
         <button onClick={() => step(1)} disabled={idx < 0 || idx >= wins.length - 1} className="no-drag rounded-md p-1.5 text-mute hover:bg-row hover:text-ink disabled:opacity-30"><ChevronRight size={16} /></button>
         <Select value={strategy} onChange={setStrategy} options={strategies.map((s) => ({ value: s, label: s }))} />
+        <Select
+          value={rule}
+          onChange={(v) => {
+            setRule(v)
+            const r = rules.find((x, i) => ruleKey(x, i) === v)
+            if (r?.strategy && strategies.includes(r.strategy)) setStrategy(r.strategy)
+          }}
+          width={240}
+          options={[{ value: '', label: rules.length ? 'Mark a ledger rule…' : 'No ledger rules' }, ...rules.map((r, i) => ({ value: ruleKey(r, i), label: `#${r.attempt_global ?? '?'} ${r.rule}` }))]}
+        />
         {loading && <RefreshCw size={14} className="animate-spin text-mute" />}
       </div>
       <ErrorBox error={err} />
+      {ruleRow && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-mute">
+          <span>
+            <span className="font-mono text-ink-2">{ruleRow.rule}</span> in this window:{' '}
+            {entries.length ? (
+              entries.map((e, i) => {
+                const k = w ? w.s.indexOf(e.s) : -1
+                return (
+                  <span key={i} className="mr-2" style={{ color: sideColor(e.side) }}>
+                    {e.side.toUpperCase()} at τ {k >= 0 ? w.tau[k] : '?'}
+                  </span>
+                )
+              })
+            ) : (
+              <span>no entries</span>
+            )}
+          </span>
+          {ruleNote && <span className="text-faint">{ruleNote}</span>}
+        </div>
+      )}
       {w && (
         <>
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-ink-2">
@@ -256,7 +378,7 @@ function Replay() {
 }
 
 // ---------------------------------------------------------------- hindsight summary
-function Hindsight() {
+function Hindsight({ asset }: { asset: Asset }) {
   const [days, setDays] = useState<string[]>([])
   const [d0, setD0] = useState('')
   const [d1, setD1] = useState('')
@@ -264,23 +386,23 @@ function Hindsight() {
   const [err, setErr] = useState<string>()
   const [loading, setLoading] = useState(false)
   useEffect(() => {
-    mb().tape.days().then((x) => {
+    mb().tape.days(asset).then((x) => {
       if (x.error) return setErr(x.error)
       setDays(x.days)
       setD0(x.days.find((d: string) => d >= '2026-09-28') ?? x.days[0])
       setD1(x.days[x.days.length - 1])
     })
-  }, [])
+  }, [asset])
   useEffect(() => {
     if (!d0 || !d1) return
     setLoading(true)
-    mb().tape.summary(d0, d1).then((x) => {
+    mb().tape.summary(d0, d1, asset).then((x) => {
       setLoading(false)
       if (x.error) return setErr(x.error)
       setErr(undefined)
       setR(x)
     })
-  }, [d0, d1])
+  }, [d0, d1, asset])
   const buckets: string[] = r ? [...r.buckets].reverse() : []
   const rows: any[] = r ? [...r.rows].sort((a, b) => (a.strategy === 'best' ? -1 : b.strategy === 'best' ? 1 : 0)) : []
   return (
@@ -424,15 +546,17 @@ function Ledger() {
 
 export function TapeView() {
   const [tab, setTab] = useState<Tab>((['replay', 'hindsight', 'ledger'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'replay') as Tab)
+  const [asset, setAsset] = useState<Asset>('BTC')
   return (
     <div className="mx-auto w-full max-w-[1180px] px-8 pb-12 pt-8">
       <div className="mb-1 flex items-center gap-2.5 text-[20px] font-semibold text-ink">
         <Activity size={20} className="text-accent" />Tape
       </div>
       <div className="mb-5 text-[13.5px] text-mute">
-        The hindsight map of every window and the ledger of every rule tried. BTC · read-only from <code className="text-coral">~/vader-swarm/data/kalshi/lab/tape</code>
+        The hindsight map of every window and the ledger of every rule tried. {asset} · read-only from <code className="text-coral">~/vader-swarm/data/kalshi/lab/tape</code>
       </div>
-      <div className="mb-5 inline-flex rounded-lg border border-line bg-[#212121] p-0.5">
+      <div className="mb-5 flex items-center gap-3">
+      <div className="inline-flex rounded-lg border border-line bg-[#212121] p-0.5">
         {(['replay', 'hindsight', 'ledger'] as Tab[]).map((t) => (
           <button
             key={t}
@@ -443,7 +567,17 @@ export function TapeView() {
           </button>
         ))}
       </div>
-      {tab === 'replay' ? <Replay /> : tab === 'hindsight' ? <Hindsight /> : <Ledger />}
+      {tab !== 'ledger' && (
+        <div className="inline-flex rounded-lg border border-line bg-[#212121] p-0.5" title="Asset">
+          {ASSETS.map((a) => (
+            <button key={a} onClick={() => setAsset(a)} className={`no-drag rounded-md px-3 py-1 text-[13px] ${asset === a ? 'bg-row text-ink' : 'text-mute hover:text-ink'}`}>
+              {a}
+            </button>
+          ))}
+        </div>
+      )}
+      </div>
+      {tab === 'replay' ? <Replay key={asset} asset={asset} /> : tab === 'hindsight' ? <Hindsight key={asset} asset={asset} /> : <Ledger />}
     </div>
   )
 }
