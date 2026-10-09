@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import {
-  ArrowLeft, ArrowRight, Box, ChevronDown, ChevronRight, Code2, LayoutGrid, MessageSquareText,
-  PanelLeft, Plus, Search, SlidersHorizontal, Sparkles, Shapes, Activity,
+  ArrowLeft, ArrowRight, Box, ChevronDown, ChevronRight, Code2, FolderPlus, LayoutGrid, MessageSquareText,
+  MoreHorizontal, PanelLeft, Pencil, Plus, Search, SlidersHorizontal, Sparkles, Shapes, Activity, Trash2,
 } from 'lucide-react'
 import type { AppState, Session } from '../../shared/types'
+import { ActionMenu } from './Menu'
 
 export type View = 'chat' | 'artifacts' | 'customize' | 'tape'
 
@@ -15,9 +16,17 @@ export function Sidebar(props: {
   onNew: (projectId?: string) => void
   onView: (v: View) => void
   onToggle: () => void
+  canBack: boolean
+  canForward: boolean
+  onBack: () => void
+  onForward: () => void
+  onRename: (key: string) => void
+  onDelete: (key: string) => void
+  onAddProject: () => void
 }) {
   const [q, setQ] = useState('')
   const [moreOpen, setMoreOpen] = useState(false)
+  const [menuFor, setMenuFor] = useState<string | null>(null)
   const { state } = props
   const match = (s: Session) => !q || s.title.toLowerCase().includes(q.toLowerCase())
   const navRow = 'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[6px] text-[14.5px] text-ink-2 hover:bg-row hover:text-ink'
@@ -28,8 +37,8 @@ export function Sidebar(props: {
       <div className="drag flex h-[58px] items-center pl-[92px] pr-3">
         <div className="no-drag flex items-center gap-1 text-mute">
           <button onClick={props.onToggle} className="rounded-md p-1.5 hover:bg-row hover:text-ink" title="Toggle sidebar"><PanelLeft size={17} /></button>
-          <button className="rounded-md p-1.5 hover:bg-row hover:text-ink" title="Back"><ArrowLeft size={17} /></button>
-          <button className="rounded-md p-1.5 hover:bg-row hover:text-ink" title="Forward"><ArrowRight size={17} /></button>
+          <button onClick={props.onBack} disabled={!props.canBack} className="rounded-md p-1.5 hover:bg-row hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-mute" title="Back (⌘[)"><ArrowLeft size={17} /></button>
+          <button onClick={props.onForward} disabled={!props.canForward} className="rounded-md p-1.5 hover:bg-row hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-mute" title="Forward (⌘])"><ArrowRight size={17} /></button>
         </div>
         <div className="no-drag ml-auto flex items-center rounded-lg bg-[#232323] p-0.5">
           <button className="rounded-md p-1.5 text-mute hover:text-ink" title="Chat"><MessageSquareText size={16} /></button>
@@ -84,23 +93,57 @@ export function Sidebar(props: {
               {sessions.map((s) => {
                 const sel = state.selected === s.key && props.view === 'chat'
                 const run = props.running.has(s.key)
+                const menuOpen = menuFor === s.key
                 return (
-                  <button
+                  <div
                     key={s.key}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => props.onSelect(s.key)}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[6px] text-left text-[14.5px] ${
-                      sel ? 'bg-row text-ink' : 'text-ink-2 hover:bg-[#222] hover:text-ink'
+                    onKeyDown={(e) => e.key === 'Enter' && props.onSelect(s.key)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setMenuFor(s.key)
+                    }}
+                    className={`group relative flex w-full cursor-default items-center gap-2.5 rounded-lg px-2.5 py-[6px] text-left text-[14.5px] outline-none ${
+                      sel || menuOpen ? 'bg-row text-ink' : 'text-ink-2 hover:bg-[#222] hover:text-ink'
                     }`}
                   >
                     <span className={`h-[7px] w-[7px] shrink-0 rounded-full border ${run ? 'pulse border-accent bg-accent' : 'border-faint'}`} />
                     <span className="truncate">{s.title}</span>
-                    {s.spawnedBy && <Sparkles size={12} className="ml-auto shrink-0 text-accent" />}
-                  </button>
+                    {s.spawnedBy && <Sparkles size={12} className="ml-auto shrink-0 text-accent group-hover:hidden" />}
+                    <ActionMenu
+                      align="right"
+                      width={180}
+                      open={menuOpen}
+                      onOpenChange={(o) => setMenuFor(o ? s.key : null)}
+                      className={`ml-auto shrink-0 ${menuOpen ? '' : 'hidden group-hover:block'}`}
+                      trigger={(_o, toggle) => (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggle()
+                          }}
+                          className="-my-1 rounded p-0.5 text-mute hover:bg-[#3a3a3a] hover:text-ink"
+                          title="Session actions"
+                        >
+                          <MoreHorizontal size={15} />
+                        </button>
+                      )}
+                      items={[
+                        { id: 'rename', label: 'Rename', icon: <Pencil size={13} />, onSelect: () => props.onRename(s.key) },
+                        { id: 'delete', label: 'Delete', icon: <Trash2 size={13} />, danger: true, separator: true, onSelect: () => props.onDelete(s.key) },
+                      ]}
+                    />
+                  </div>
                 )
               })}
             </section>
           )
         })}
+        <button onClick={props.onAddProject} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[6px] text-[13.5px] text-mute hover:bg-[#222] hover:text-ink">
+          <FolderPlus size={15} />Add project
+        </button>
       </div>
 
       <div className="flex items-center gap-2.5 border-t border-line px-4 py-3">

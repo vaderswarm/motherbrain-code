@@ -1,6 +1,92 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 
+export interface Action {
+  id: string
+  label: string
+  icon?: ReactNode
+  hint?: string
+  danger?: boolean
+  disabled?: boolean
+  separator?: boolean // a divider above this item
+  onSelect: () => void
+}
+
+function useOutside(open: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close()
+    }
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && close()
+    document.addEventListener('mousedown', h)
+    document.addEventListener('keydown', k)
+    return () => {
+      document.removeEventListener('mousedown', h)
+      document.removeEventListener('keydown', k)
+    }
+  }, [open, close])
+  return ref
+}
+
+// A popover of actions behind any trigger, in the same style as the pickers.
+export function ActionMenu(props: {
+  trigger: (open: boolean, toggle: () => void) => ReactNode
+  items: Action[]
+  align?: 'left' | 'right'
+  up?: boolean
+  width?: number
+  className?: string
+  open?: boolean // controlled (e.g. opened by a right-click elsewhere)
+  onOpenChange?: (open: boolean) => void
+}) {
+  const [own, setOwn] = useState(false)
+  const open = props.open ?? own
+  const setOpen = (v: boolean | ((o: boolean) => boolean)) => {
+    const next = typeof v === 'function' ? v(open) : v
+    setOwn(next)
+    props.onOpenChange?.(next)
+  }
+  const ref = useOutside(open, () => setOpen(false))
+  return (
+    <div ref={ref} className={`relative no-drag ${props.className ?? ''}`}>
+      {props.trigger(open, () => setOpen((o) => !o))}
+      {open && (
+        <div
+          role="menu"
+          style={{ minWidth: props.width ?? 220 }}
+          className={`absolute z-50 rounded-xl border border-line-strong bg-[#252525] p-1 shadow-2xl ${props.up ? 'bottom-full mb-2' : 'top-full mt-1'} ${
+            props.align === 'right' ? 'right-0' : 'left-0'
+          }`}
+        >
+          {props.items.map((i) => (
+            <div key={i.id}>
+              {i.separator && <div className="my-1 border-t border-line" />}
+              <button
+                role="menuitem"
+                disabled={i.disabled}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setOpen(false)
+                  i.onSelect()
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] disabled:opacity-40 ${
+                  i.danger ? 'text-[#f0a49e] hover:bg-[#3a2523]' : 'text-ink-2 hover:bg-row hover:text-ink'
+                }`}
+              >
+                {i.icon && <span className="flex w-4 shrink-0 justify-center text-mute">{i.icon}</span>}
+                <span className="flex-1 truncate">{i.label}</span>
+                {i.hint && <span className="text-[11.5px] text-faint">{i.hint}</span>}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export interface MenuItem {
   id: string
   label: string
