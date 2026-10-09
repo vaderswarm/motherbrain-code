@@ -4,10 +4,11 @@
 Run by the Electron main process with the vader-swarm venv; prints one JSON object on stdout.
     days [asset]                         -> {"days": [...], "strategies": [...]}
     windows <day> [asset]                -> {"windows": [{ticker, close_ts, outcome_yes, feed_ok}]}
-    window <ticker> <day> <strategy>     -> per-second series + the hindsight strip for that strategy
+    window <ticker> <day> <strategy> [asset]  -> per-second series + the hindsight strip for that strategy
     summary <day_from> <day_to> [asset]  -> share of entries net > 0 and mean c/ct by strategy x tau bucket
+    entries <ticker> <day> [asset]       -> a ledger rule's entries in one window; the ledger row is read from stdin
 Never writes to the tape data. Per-day summaries are cached under $TAPE_CACHE (keyed by file mtime)."""
-import json, math, os, sys
+import ast, json, math, os, sys
 from pathlib import Path
 
 ROOT = Path(os.path.expanduser("~/vader-swarm"))
@@ -50,11 +51,11 @@ def cmd_windows(day, asset="BTC"):
     out({"windows": [{"ticker": r.ticker, "close_ts": int(r.close_ts), "outcome_yes": float(r.outcome_yes), "feed_ok": bool(r.feed_ok)} for r in y.itertuples()]})
 
 
-def cmd_window(ticker, day, strategy):
+def cmd_window(ticker, day, strategy, asset=None):
     import numpy as np, pandas as pd
     sys.path.insert(0, str(ROOT))
     from core.tape.data import window
-    asset = "ETH" if "ETH" in ticker.upper() else "BTC"
+    asset = asset or ("ETH" if "ETH" in ticker.upper() else "BTC")
     w = window(ticker, day=day, asset=asset)
     o = pd.read_parquet(TAPE / "oracle" / asset / f"{day}.parquet", columns=["ticker", "s", "side", f"net__{strategy}"], filters=[("ticker", "=", ticker)])
     col = f"net__{strategy}"
@@ -107,9 +108,56 @@ def cmd_summary(d0, d1, asset="BTC"):
     out({"days": [f.stem for f in fs], "buckets": buckets, "rows": rows})
 
 
+def cmd_entries(ticker, day, asset="BTC"):
+    """Where a ledger rule entered in this window.  A row carrying an explicit `entries` list
+    ([{ticker, s, side}]) is used as is.  Otherwise the rule is rebuilt from its ledger params: the
+    feature bands (lo <= f < hi, or <= hi when hi_inclusive) and spec.side, applied to the CACHED
+    conditions frame of that day (never built here, so nothing is written), first decision per side,
+    entering at s + 1 (latency 0), as core.tape.score does by default."""
+    import pandas as pd
+    row = json.loads(sys.stdin.read() or "{}")
+    ents = row.get("entries")
+    if isinstance(ents, list):
+        sel = [e for e in ents if e.get("ticker") == ticker]
+        out({"source": "row", "entries": [{"s": int(e["s"]), "side": e.get("side", "yes")} for e in sel]})
+        return
+    if row.get("asset") and row["asset"] != asset:
+        out({"source": "bands", "entries": [], "note": f"rule was scored on {row['asset']}"})
+        return
+    p = row.get("params") or {}
+    if isinstance(p, str):
+        p = ast.literal_eval(p)
+    bands, spec = p.get("bands"), p.get("spec") or {}
+    if not bands:
+        out({"error": "This rule's ledger row has no feature bands and no entries list, so its entries cannot be rebuilt here."})
+        return
+    fo = TAPE / "cond" / asset / f"{day}.parquet"
+    if not fo.exists():
+        out({"error": f"No cached conditions for {asset} {day} ({fo}); the panel does not build them."})
+        return
+    C = pd.read_parquet(fo, filters=[("ticker", "=", ticker)])
+    if row.get("feed_gate") and "feed_ok" in C:
+        C = C[C.feed_ok]
+    if not {b["feature"] for b in bands} <= set(C.columns):
+        sys.path.insert(0, str(ROOT))
+        from core.tape.conditions import derived_features
+        C = derived_features(C)
+    m = pd.Series(True, index=C.index)
+    for b in bands:
+        v = C[b["feature"]]
+        if b.get("lo") is not None:
+            m &= v >= b["lo"]
+        if b.get("hi") is not None:
+            m &= (v <= b["hi"]) if b.get("hi_inclusive") else (v < b["hi"])
+    hit = C[m].sort_values("s")
+    sides = [spec["side"]] if spec.get("side") in ("yes", "no") else ["yes", "no"]
+    entries = [{"s": int(hit.s.iloc[0]) + 1, "decision_s": int(hit.s.iloc[0]), "side": sd} for sd in sides if len(hit)]
+    out({"source": "bands", "entries": entries, "note": "rebuilt from the ledger's bands: first decision per side, latency 0"})
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     try:
-        {"days": cmd_days, "windows": cmd_windows, "window": cmd_window, "summary": cmd_summary}[a[0]](*a[1:])
+        {"days": cmd_days, "windows": cmd_windows, "window": cmd_window, "summary": cmd_summary, "entries": cmd_entries}[a[0]](*a[1:])
     except Exception as e:
         out({"error": f"{type(e).__name__}: {e}"})

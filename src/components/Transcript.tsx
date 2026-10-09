@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, ShieldQuestion, Sparkles, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, FileText, Image as ImageIcon, Paperclip, ShieldQuestion, Sparkles, Wrench, X } from 'lucide-react'
 import type { Block, Message } from '../../shared/types'
 
 function short(v: unknown, n = 140): string {
@@ -65,7 +65,17 @@ export function Transcript(props: {
     <div className="selectable mx-auto w-full max-w-[860px] px-10 pt-6 pb-10">
       {props.messages.map((m, i) =>
         m.role === 'user' ? (
-          <div key={i} className="my-5 flex justify-end">
+          <div key={i} className="my-5 flex flex-col items-end gap-1.5">
+            {m.attachments?.length ? (
+              <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
+                {m.attachments.map((a) => (
+                  <span key={a.path} title={a.path} className="flex max-w-[260px] items-center gap-1.5 rounded-lg border border-line-strong bg-[#232323] px-2 py-1 text-[12.5px] text-ink-2">
+                    {a.kind === 'image' ? <ImageIcon size={13} className="shrink-0 text-mute" /> : a.kind === 'text' ? <FileText size={13} className="shrink-0 text-mute" /> : <Paperclip size={13} className="shrink-0 text-mute" />}
+                    <span className="truncate">{a.name}</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-[#2f2f2f] px-4 py-2.5 leading-relaxed text-ink">
               {m.blocks.map((b) => (b.kind === 'text' ? b.text : '')).join('')}
             </div>
